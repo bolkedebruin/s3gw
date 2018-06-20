@@ -58,10 +58,10 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		credentials := strings.Split(header[pos1:pos2], "/")
 
 		if name, ok := keys[credentials[0]]; !ok {
+			log.Printf("Access denied to accessKey=%s due to not found", credentials[0])
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		} else {
-			fmt.Printf("User %s allowed\n", name)
 			username = name
 		}
 	} else {
@@ -188,26 +188,45 @@ func main() {
 		defaultConfig = "/etc/s3gw/sg3w.toml"
 	)
 
-	configfile := flag.String("configfile", defaultConfig, "configuration file")
+	configFile := flag.String("configfile", defaultConfig, "configuration file")
 
 	flag.Parse()
 
-	config := ReadConfig(*configfile)
+	config := ReadConfig(*configFile)
 
-	fmt.Printf("Listening on: %s\n", config.Port)
-	fmt.Printf("S3 Host Endpoint: %s\n", config.EndPoint)
+	log.Printf("Listening on: %s\n", config.Port)
+	log.Printf("S3 Host Endpoint: %s\n", config.EndPoint)
 
-	service = ranger.GetPolicy(config.Ranger.ServiceName, config.Ranger.EndPoint)
+	var err error
+	service, err = ranger.GetPolicy(config.Ranger.ServiceName, config.Ranger.EndPoint)
+	if err != nil {
+		log.Fatal("Cannot get initial policy", err)
+		panic(err)
+	}
 
-	radosclient := config.Rados
-	keys = radosclient.SyncUserAccessKeys()
-
+	radosClient := config.Rados
+	keys, err = radosClient.SyncUserAccessKeys()
+	if err != nil {
+		log.Fatal("Cannot get initial users from ceph/rados", err)
+		panic(err)
+	}
 	ticker := time.NewTicker(5 * time.Second)
 	go func() {
-		for t := range ticker.C {
-			fmt.Printf("%s: Updating Ranger Policies and access keys\n", t)
-			service = ranger.GetPolicy("S3", "http://localhost:6080")
-			keys = radosclient.SyncUserAccessKeys()
+		for range ticker.C {
+			log.Printf("Updating Ranger Policies and Rados Access keys\n")
+			newService, err := ranger.GetPolicy(config.Ranger.ServiceName, config.Ranger.EndPoint)
+			if err != nil {
+				log.Printf("Cannot refresh Ranger policy due to error %s", err)
+			} else {
+				service = newService
+			}
+
+			newKeys, err := radosClient.SyncUserAccessKeys()
+			if err != nil {
+				log.Printf("Cannot refresh users from Ceph/Rados due to error %s", err)
+			} else {
+				keys = newKeys
+			}
 		}
 	}()
 

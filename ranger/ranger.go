@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"sort"
 	"github.com/ryanuber/go-glob"
+	"log"
 )
 
 const (
@@ -158,13 +159,13 @@ const (
 	POLICY_TYPE_ROWFILTER = 2
 )
 
-func GetPolicy(serviceName string, baseUrl string) (*Service) {
+func GetPolicy(serviceName string, baseUrl string) (*Service, error) {
 	client := http.Client{}
 	req, err := http.NewRequest("GET", baseUrl + policyEndpoint + serviceName, nil)
 
 	if err != nil {
-		fmt.Printf("Request to Apache Ranger failed with error %s\n", err)
-		return nil
+		log.Fatal("Request to Apache Ranger failed", err)
+		return nil, err
 	}
 
 	params := req.URL.Query()
@@ -174,8 +175,8 @@ func GetPolicy(serviceName string, baseUrl string) (*Service) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		fmt.Printf("Request to Apache Ranger failed with error %s\n", err)
-		return nil
+		log.Fatal("Request to Apache Ranger failed", err)
+		return nil, err
 	}
 
 	data, _ := ioutil.ReadAll(resp.Body)
@@ -185,20 +186,22 @@ func GetPolicy(serviceName string, baseUrl string) (*Service) {
 	err = json.Unmarshal(data, &service)
 
 	if err != nil {
-		fmt.Printf("Could not unmarshal json data due to error %s\n", err)
+		log.Fatal("Could not unmarshal json data", err)
+		return nil, err
 	}
 
-	return &service
+	return &service, nil
 }
 
 func (s *Service) IsAccessAllowed(username string, usergroups []string, accessType string, location string)(bool) {
 	sort.SliceStable(s.Policies, func(i, j int) bool {return s.Policies[i].Id < s.Policies[j].Id})
 
-	fmt.Printf("Checking policy for user=%s, groups=%s, access=%s, location=%s\n",
+	log.Printf("Checking policy for user=%s, groups=%s, access=%s, location=%s\n",
 		username, usergroups, accessType, location)
 
 	allowed := false
 	resource_match := false
+
 	for _, p := range s.Policies {
 		// match resource
 		for _, v := range p.Resources {
@@ -212,7 +215,7 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 			}
 		}
 
-		fmt.Printf("Policy id=%d, name=%s, resource_match=%s\n", p.Id, p.Name, resource_match)
+		log.Printf("Policy id=%d, name=%s, resource_match=%s\n", p.Id, p.Name, resource_match)
 
 		if !resource_match {
 			continue
@@ -223,7 +226,7 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 		for _, item := range p.PolicyItems {
 			// user first
 			for _, user := range item.Users {
-				fmt.Printf("Checking allow policy user=%s\n", user)
+				log.Printf("Checking allow policy user=%s\n", user)
 
 				if user == username {
 					for _, access := range item.Accesses {
@@ -259,6 +262,8 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 			// check exceptions
 
 			// check deny policy
+			log.Printf("Checking allow policy items=%d\n", len(p.DenyPolicyItems))
+
 			for _, item := range p.DenyPolicyItems {
 				// user first
 				for _, user := range item.Users {

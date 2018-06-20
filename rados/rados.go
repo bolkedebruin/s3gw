@@ -3,9 +3,9 @@ package rados
 import (
 	rgw "github.com/myENA/radosgwadmin"
 	rcl "github.com/myENA/restclient"
-	"fmt"
 	"time"
 	"context"
+	"log"
 )
 
 type RadosClient struct {
@@ -15,7 +15,7 @@ type RadosClient struct {
 	AdminPath string
 }
 
-func (c *RadosClient) SyncUserAccessKeys() (map[string] string) {
+func (c *RadosClient) SyncUserAccessKeys() (map[string] string, error) {
 	cfg := &rgw.Config{
 		ClientConfig: rcl.ClientConfig{
 			ClientTimeout: rcl.Duration(time.Second * 10),
@@ -28,7 +28,8 @@ func (c *RadosClient) SyncUserAccessKeys() (map[string] string) {
 	client, err := rgw.NewAdminAPI(cfg)
 
 	if err != nil {
-		fmt.Printf("Cannot connect to radosgw error=%s\n", err)
+		log.Fatal("Cannot connect to radosgw error=%s\n", err)
+		return nil, err
 	}
 
 	key2user := make(map[string]string)
@@ -44,5 +45,5 @@ func (c *RadosClient) SyncUserAccessKeys() (map[string] string) {
 		}
 	}
 
-	return key2user
+	return key2user, nil
 }
