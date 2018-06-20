@@ -27,3 +27,12 @@ accesskey = "<ACCESSKEY>"                                 # myaccesskey
 secretkey = "<SECRETKEY>"                                 # mysecretkey
 adminpath = "/admin"                                    
 ```
+
+## Roadmap
+
+* Tests
+* Improved policy handling
+* Ranger Audit
+* Bucket Notifications 
+* Lineage (Apache Atlas integration)
+* STS (Receiving accesskeys from Redis/Kafka)
