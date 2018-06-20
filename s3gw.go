@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"net/http/httputil"
 	"net/http"
-	"fmt"
 	"strings"
 	"flag"
 	"log"
@@ -58,7 +57,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		credentials := strings.Split(header[pos1:pos2], "/")
 
 		if name, ok := keys[credentials[0]]; !ok {
-			log.Printf("Access denied to accessKey=%s due to not found", credentials[0])
+			log.Printf("Access denied accessKey=%s due to not found", credentials[0])
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		} else {
@@ -87,54 +86,73 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 	}
 
+	log.Printf("user=%s, bucket=%s, key=%s, method=%s\n", username, o, k, r.Method)
+
+	query := r.URL.Query()
+
 	switch strings.ToUpper(r.Method) {
 	case "DELETE":
-		fmt.Printf("bucket=%s, key=%s, method is HEAD\n", o, k)
-		if strings.Index(r.URL.String(), "uploadId=") > 0 {
-			fmt.Printf("Skip notification for multipart ABORT")
+		if len(query.Get("uploadId")) > 0 {
+			log.Printf("Skip notification for multipart ABORT")
 		}
 		if !service.IsAccessAllowed(username, groups, "write", location) {
+			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+				location, username, groups, "write")
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		break
 	case "HEAD":
-		fmt.Printf("bucket=%s, key=%s, method is HEAD\n", o, k)
 		if !service.IsAccessAllowed(username, groups, "read", location) {
+			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+				location, username, groups, "read")
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		break
 	case "PUT":
-		fmt.Printf("bucket=%s, key=%s, method is PUT\n", o, k)
-		if !service.IsAccessAllowed(username, groups, "write", location) {
+		accessType := "write"
+		if len(query.Get("acl")) > 0 {
+			accessType = "write_acp"
+		}
+		if !service.IsAccessAllowed(username, groups, accessType, location) {
+			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+				location, username, groups,accessType)
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		break
 	case "GET":
-		fmt.Printf("bucket=%s, key=%s, Method is GET\n", o, k)
-		if !service.IsAccessAllowed(username, groups, "read", location) {
+		accessType := "read"
+		if len(query.Get("acl")) > 0 {
+			accessType = "read_acp"
+		}
+		if !service.IsAccessAllowed(username, groups, accessType, location) {
+			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+				location, username, groups, accessType)
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		break
 	case "POST":
-		if strings.Index(r.URL.String(), "?uploads") > 0 {
-			fmt.Printf("skip notification for multipart INITIATE")
+		if len(query.Get("uploads")) > 0 {
+			log.Printf("skip notification for multipart INITIATE")
 		}
 		if !service.IsAccessAllowed(username, groups, "write", location) {
+			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+				location, username, groups, "write")
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		break
 	default:
-		fmt.Printf("Unknown method=%s", r.Method)
+		log.Printf("Unknown method=%s", r.Method)
+		log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
+			location, username, groups, "unkown")
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 
-	//p.proxy.Transport = &Transport{}
 	p.proxy.ServeHTTP(w, r)
 
 }

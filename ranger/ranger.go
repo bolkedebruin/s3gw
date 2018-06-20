@@ -2,7 +2,6 @@ package ranger
 
 import (
 	"net/http"
-	"fmt"
 	"io/ioutil"
 	"encoding/json"
 	"sort"
@@ -221,7 +220,7 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 			continue
 		}
 
-		fmt.Printf("Checking allow policy items=%d\n", len(p.PolicyItems))
+		log.Printf("Checking allow policy items=%d\n", len(p.PolicyItems))
 		// first check for allow policy
 		for _, item := range p.PolicyItems {
 			// user first
