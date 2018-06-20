@@ -206,7 +206,7 @@ func main() {
 		defaultConfig = "/etc/s3gw/sg3w.toml"
 	)
 
-	configFile := flag.String("configfile", defaultConfig, "configuration file")
+	configFile := flag.String("conf", defaultConfig, "configuration file")
 
 	flag.Parse()
 
