@@ -158,6 +158,7 @@ const (
 	POLICY_TYPE_ROWFILTER = 2
 )
 
+// GetPolicy loads the service definition and resource policies from Ranger
 func GetPolicy(serviceName string, baseUrl string) (*Service, error) {
 	client := http.Client{}
 	req, err := http.NewRequest("GET", baseUrl + policyEndpoint + serviceName, nil)
@@ -208,12 +209,13 @@ func hasAccess(names []string, other []string, accesses []Access, accessType str
 	return false
 }
 
-func (s *Service) IsAccessAllowed(username string, usergroups []string, accessType string, location string)(bool) {
+// IsAccessAllowed checks if a user is allowed by policy to access the resource location.
+func (s *Service) IsAccessAllowed(username string, userGroups []string, accessType string, location string)(bool) {
 	// TODO: Sort on importance of policy
 	sort.SliceStable(s.Policies, func(i, j int) bool {return s.Policies[i].Id < s.Policies[j].Id})
 
 	log.Printf("Checking policy for user=%s, groups=%s, access=%s, location=%s\n",
-		username, usergroups, accessType, location)
+		username, userGroups, accessType, location)
 
 	allowed := false
 	resourceMatch := false
@@ -246,7 +248,7 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 
 			// groups
 			if !allowed {
-				allowed = hasAccess(usergroups, item.Groups, item.Accesses, accessType)
+				allowed = hasAccess(userGroups, item.Groups, item.Accesses, accessType)
 			}
 
 			// TODO: check exceptions
@@ -260,7 +262,7 @@ func (s *Service) IsAccessAllowed(username string, usergroups []string, accessTy
 
 			// groups
 			if allowed {
-				allowed = !hasAccess(usergroups, item.Groups, item.Accesses, accessType)
+				allowed = !hasAccess(userGroups, item.Groups, item.Accesses, accessType)
 			}
 
 			// TODO: check exceptions

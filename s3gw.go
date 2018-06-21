@@ -57,14 +57,15 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		credentials := strings.Split(header[pos1:pos2], "/")
 
 		if name, ok := keys[credentials[0]]; !ok {
-			log.Printf("Access denied accessKey=%s due to not found", credentials[0])
+			log.Printf("Access denied accessKey=%s due to not found\n", credentials[0])
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		} else {
 			username = name
 		}
 	} else {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		log.Printf("No 'Authorization' header found\n")
+		http.Error(w, "No 'Authorization' header found. Access denied", http.StatusForbidden)
 		return
 	}
 
