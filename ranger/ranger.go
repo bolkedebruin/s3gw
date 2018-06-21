@@ -7,6 +7,7 @@ import (
 	"sort"
 	"github.com/ryanuber/go-glob"
 	"log"
+	"math"
 )
 
 const (
@@ -33,6 +34,8 @@ type PolicyItem struct {
 	Groups []string
 	Conditions []string
 	DelegateAdmin bool
+
+	score int // calculated policy score
 }
 
 type Policy struct {
@@ -153,9 +156,29 @@ type AccessRequest interface {
 }
 
 const (
-	POLICY_TYPE_ACCESS = 0
-	POLICY_TYPE_DATAMASK = 1
-	POLICY_TYPE_ROWFILTER = 2
+	// From: https://github.com/apache/ranger/blob//agents-common/src/main/java/org/apache/ranger/plugin/
+	// policyevaluator/RangerOptimizedPolicyEvaluator.java
+	MATCH_ANY = "*"
+	MATCH_ONE = "?"
+
+	ITEM_DEFAULT_SCORE = 1000
+
+	DEFAULT_SCORE = 10000
+	DISCOUNT_RESOURCE = 100
+	DISCOUNT_USERSGROUPS = 25
+	DISCOUNT_ACCESS_TYPES = 25
+	DISCOUNT_CUSTOM_CONDITIONS = 25
+	DISCOUNT_MATCH_ANY = 25
+	DISCOUNT_HAS_MATCH_ANY = 10
+	DISCOUNT_HAS_MATCH_ONE = 5
+	DISCOUNT_IS_EXCLUDES = 5
+	DISCOUNT_IS_RECURSIVE = 5
+	CUSTOM_CONDITION_PENALTY = 5
+	DYNAMIC_RESOURCE_EVAL_PENALTY = 20
+
+	GROUP_PUBLIC = "public"
+	USER_CURRENT = "{USER}"
+	USER_OWNER = "{OWNER}"
 )
 
 // GetPolicy loads the service definition and resource policies from Ranger
@@ -193,10 +216,43 @@ func GetPolicy(serviceName string, baseUrl string) (*Service, error) {
 	return &service, nil
 }
 
-func hasAccess(names []string, other []string, accesses []Access, accessType string)(bool) {
+// checks if an array of strings contains a specific string
+func contains(haystack []string, needle string)(bool) {
+	for _, hay := range haystack {
+		if hay == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// Calculates the score for a policy item
+func (pi *PolicyItem) computeEvalScore(service ServiceDefinition) {
+	score := ITEM_DEFAULT_SCORE
+
+	if contains(pi.Groups, GROUP_PUBLIC) {
+		score -= DISCOUNT_USERSGROUPS
+	} else {
+		count := len(pi.Users) + len(pi.Groups)
+		score -= int(math.Min(float64(DISCOUNT_USERSGROUPS), float64(count)))
+	}
+
+	score -= int(math.Round(float64((DISCOUNT_ACCESS_TYPES * len(pi.Accesses)) / len(service.AccessTypes))))
+
+	customConditionsPenalty := CUSTOM_CONDITION_PENALTY * len(pi.Conditions)
+	customConditionsDiscount := DISCOUNT_CUSTOM_CONDITIONS - customConditionsPenalty
+
+	if customConditionsDiscount > 0 {
+		score -= customConditionsDiscount
+	}
+
+	pi.score = score
+}
+
+func hasAccess(names []string, other []string, accesses []Access, accessType string, isOwner bool)(bool) {
 	for _, name := range names {
 		for i := range other {
-			if name == other[i] {
+			if name == other[i] || other[i] == USER_CURRENT || (other[i] == USER_OWNER && isOwner) {
 				for _, access := range accesses {
 					if access.Type == accessType && access.IsAllowed {
 						return true
@@ -210,7 +266,9 @@ func hasAccess(names []string, other []string, accesses []Access, accessType str
 }
 
 // IsAccessAllowed checks if a user is allowed by policy to access the resource location.
-func (s *Service) IsAccessAllowed(username string, userGroups []string, accessType string, location string)(bool) {
+func (s *Service) IsAccessAllowed(
+	username string, userGroups []string,
+	accessType string, location string, owner string)(bool) {
 	// TODO: Sort on importance of policy
 	sort.SliceStable(s.Policies, func(i, j int) bool {return s.Policies[i].Id < s.Policies[j].Id})
 
@@ -244,11 +302,11 @@ func (s *Service) IsAccessAllowed(username string, userGroups []string, accessTy
 		log.Printf("Checking allow policy items=%d\n", len(p.PolicyItems))
 		for _, item := range p.PolicyItems {
 			// user first
-			allowed = hasAccess([]string{username}, item.Users, item.Accesses, accessType)
+			allowed = hasAccess([]string{username}, item.Users, item.Accesses, accessType, username == owner)
 
 			// groups
 			if !allowed {
-				allowed = hasAccess(userGroups, item.Groups, item.Accesses, accessType)
+				allowed = hasAccess(userGroups, item.Groups, item.Accesses, accessType, false)
 			}
 
 			// TODO: check exceptions
@@ -258,11 +316,11 @@ func (s *Service) IsAccessAllowed(username string, userGroups []string, accessTy
 
 		for _, item := range p.DenyPolicyItems {
 			// allowed signals denial
-			allowed = !hasAccess([]string{username}, item.Users, item.Accesses, accessType)
+			allowed = !hasAccess([]string{username}, item.Users, item.Accesses, accessType, username == owner)
 
 			// groups
 			if allowed {
-				allowed = !hasAccess(userGroups, item.Groups, item.Accesses, accessType)
+				allowed = !hasAccess(userGroups, item.Groups, item.Accesses, accessType, false)
 			}
 
 			// TODO: check exceptions

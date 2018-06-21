@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"os"
 	"github.com/BurntSushi/toml"
+	"github.com/patrickmn/go-cache"
 )
 
 type Proxy struct {
@@ -38,11 +39,13 @@ type Config struct {
 
 var service *ranger.Service
 var keys map[string]string
+var radosClient rados.RadosClient
+var ownerCache *cache.Cache
 
 func NewProxy(target string) *Proxy {
-	url, _ := url.Parse(target)
+	u, _ := url.Parse(target)
 
-	return &Proxy{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	return &Proxy{target: u, proxy: httputil.NewSingleHostReverseProxy(u)}
 }
 
 func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
@@ -75,6 +78,18 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		location += "/" + k
 	}
 
+	// get owner of the bucket
+	owner := ""
+	if len(o) > 0 {
+		item, found := ownerCache.Get(o)
+		if !found {
+			log.Printf("Cached owner not found for bucket=%s\n", o)
+			item, _ = radosClient.GetBucketOwner(o)
+			ownerCache.SetDefault(o, item)
+		}
+		owner = item.(string)
+	}
+
 	// load groups of the user from local system
 	my_user, err := user.Lookup(username)
 	var groups []string
@@ -96,7 +111,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("uploadId")) > 0 {
 			log.Printf("Skip notification for multipart ABORT")
 		}
-		if !service.IsAccessAllowed(username, groups, "write", location) {
+		if !service.IsAccessAllowed(username, groups, "write", location, owner) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "write")
 			http.Error(w, "Access denied", http.StatusForbidden)
@@ -104,7 +119,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	case "HEAD":
-		if !service.IsAccessAllowed(username, groups, "read", location) {
+		if !service.IsAccessAllowed(username, groups, "read", location, owner) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "read")
 			http.Error(w, "Access denied", http.StatusForbidden)
@@ -116,7 +131,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("acl")) > 0 {
 			accessType = "write_acp"
 		}
-		if !service.IsAccessAllowed(username, groups, accessType, location) {
+		if !service.IsAccessAllowed(username, groups, accessType, location, owner) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups,accessType)
 			http.Error(w, "Access denied", http.StatusForbidden)
@@ -128,7 +143,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("acl")) > 0 {
 			accessType = "read_acp"
 		}
-		if !service.IsAccessAllowed(username, groups, accessType, location) {
+		if !service.IsAccessAllowed(username, groups, accessType, location, owner) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, accessType)
 			http.Error(w, "Access denied", http.StatusForbidden)
@@ -139,7 +154,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("uploads")) > 0 {
 			log.Printf("skip notification for multipart INITIATE")
 		}
-		if !service.IsAccessAllowed(username, groups, "write", location) {
+		if !service.IsAccessAllowed(username, groups, "write", location, owner) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "write")
 			http.Error(w, "Access denied", http.StatusForbidden)
@@ -147,7 +162,6 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	default:
-		log.Printf("Unknown method=%s", r.Method)
 		log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 			location, username, groups, "unkown")
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -216,6 +230,8 @@ func main() {
 	log.Printf("Listening on: %s\n", config.Port)
 	log.Printf("S3 Host Endpoint: %s\n", config.EndPoint)
 
+	ownerCache = cache.New(time.Hour, time.Hour)
+
 	var err error
 	service, err = ranger.GetPolicy(config.Ranger.ServiceName, config.Ranger.EndPoint)
 	if err != nil {
@@ -223,7 +239,7 @@ func main() {
 		panic(err)
 	}
 
-	radosClient := config.Rados
+	radosClient = config.Rados
 	keys, err = radosClient.SyncUserAccessKeys()
 	if err != nil {
 		log.Fatal("Cannot get initial users from ceph/rados", err)

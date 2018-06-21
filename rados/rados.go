@@ -6,6 +6,7 @@ import (
 	"time"
 	"context"
 	"log"
+	"errors"
 )
 
 type RadosClient struct {
@@ -46,4 +47,36 @@ func (c *RadosClient) SyncUserAccessKeys() (map[string] string, error) {
 	}
 
 	return key2user, nil
+}
+
+func (c *RadosClient) GetBucketOwner(bucket string)(string, error) {
+	cfg := &rgw.Config{
+		ClientConfig: rcl.ClientConfig{
+			ClientTimeout: rcl.Duration(time.Second * 10),
+		},
+		ServerURL: c.EndPoint,
+		AdminPath: c.AdminPath,
+		AccessKeyID: c.AccessKey,
+		SecretAccessKey: c.SecretKey,
+	}
+	client, err := rgw.NewAdminAPI(cfg)
+
+	if err != nil {
+		log.Fatal("Cannot connect to radosgw error=%s\n", err)
+		return "", err
+	}
+
+	stats, err := client.BucketStats(context.Background(), "", bucket)
+
+	if err != nil {
+		log.Printf("Cannot get bucket=%s, %s\n", bucket, err)
+		return "", err
+	}
+
+	if len(stats) > 1 {
+		log.Fatal("Too many stats (%d) returned for bucket=%s\n", len(stats), bucket)
+		return "", errors.New("Too many stats for bucket=" + bucket)
+	}
+
+	return stats[0].Owner, nil
 }
