@@ -192,113 +192,80 @@ func GetPolicy(serviceName string, baseUrl string) (*Service, error) {
 	return &service, nil
 }
 
+func hasAccess(names []string, other []string, accesses []Access, accessType string)(bool) {
+	for _, name := range names {
+		for i := range other {
+			if name == other[i] {
+				for _, access := range accesses {
+					if access.Type == accessType && access.IsAllowed {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 func (s *Service) IsAccessAllowed(username string, usergroups []string, accessType string, location string)(bool) {
+	// TODO: Sort on importance of policy
 	sort.SliceStable(s.Policies, func(i, j int) bool {return s.Policies[i].Id < s.Policies[j].Id})
 
 	log.Printf("Checking policy for user=%s, groups=%s, access=%s, location=%s\n",
 		username, usergroups, accessType, location)
 
 	allowed := false
-	resource_match := false
+	resourceMatch := false
 
 	for _, p := range s.Policies {
 		// match resource
 		for _, v := range p.Resources {
-			for _, bucket_name := range v.Values {
+			for _, bucketName := range v.Values {
 				if v.IsRecursive {
-					bucket_name += "*"
+					bucketName += "*"
 				}
-				if glob.Glob(bucket_name, location) {
-					resource_match = true
+				if glob.Glob(bucketName, location) {
+					resourceMatch = true
 				}
 			}
 		}
 
-		log.Printf("Policy id=%d, name=%s, resource_match=%s\n", p.Id, p.Name, resource_match)
+		log.Printf("Policy id=%d, name=%s, resource_match=%s\n", p.Id, p.Name, resourceMatch)
 
-		if !resource_match {
+		if !resourceMatch {
 			continue
 		}
 
+		// We have a resource match
+
 		log.Printf("Checking allow policy items=%d\n", len(p.PolicyItems))
-		// first check for allow policy
 		for _, item := range p.PolicyItems {
 			// user first
-			for _, user := range item.Users {
-				log.Printf("Checking allow policy user=%s\n", user)
-
-				if user == username {
-					for _, access := range item.Accesses {
-						if access.Type == accessType && access.IsAllowed {
-							allowed = true
-							break
-						}
-					}
-					break
-				}
-			}
+			allowed = hasAccess([]string{username}, item.Users, item.Accesses, accessType)
 
 			// groups
 			if !allowed {
-				for _, usergroup := range usergroups {
-					for _, group := range item.Groups {
-						if group == usergroup {
-							for _, access := range item.Accesses {
-								if access.Type == accessType && access.IsAllowed {
-									allowed = true
-									break
-								}
-							}
-							break
-						}
-					}
-					if allowed {
-						break
-					}
-				}
+				allowed = hasAccess(usergroups, item.Groups, item.Accesses, accessType)
 			}
 
-			// check exceptions
+			// TODO: check exceptions
+		}
 
-			// check deny policy
-			log.Printf("Checking allow policy items=%d\n", len(p.DenyPolicyItems))
+		log.Printf("Checking deny policy items=%d\n", len(p.DenyPolicyItems))
 
-			for _, item := range p.DenyPolicyItems {
-				// user first
-				for _, user := range item.Users {
-					if user == username {
-						for _, access := range item.Accesses {
-							// is allowed signals denial
-							if access.Type == accessType && access.IsAllowed {
-								allowed = false
-								break
-							}
-						}
-						break
-					}
-				}
-			}
+		for _, item := range p.DenyPolicyItems {
+			// allowed signals denial
+			allowed = !hasAccess([]string{username}, item.Users, item.Accesses, accessType)
 
 			// groups
 			if allowed {
-				for _, usergroup := range usergroups {
-					for _, group := range item.Groups {
-						if group == usergroup {
-							for _, access := range item.Accesses {
-								if access.Type == accessType && access.IsAllowed {
-									allowed = false
-									break
-								}
-							}
-							break
-						}
-					}
-					if !allowed {
-						break
-					}
-				}
+				allowed = !hasAccess(usergroups, item.Groups, item.Accesses, accessType)
 			}
+
+			// TODO: check exceptions
 		}
+
 		// if we got here we had a resource match
 		break
 	}
