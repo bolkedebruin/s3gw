@@ -323,8 +323,9 @@ func (c *Condition) isInCondition(r *AccessRequest)(error, bool) {
 			continue
 		}
 		ip := net.ParseIP(r.ClientIpAddress)
-		log.Printf("Checking clientIp=%s cidr=%s\n", r.ClientIpAddress, subnet.String())
+		log.Printf("Checking clientIp=%s cidr=%s\n", ip.String(), subnet.String())
 		if subnet.Contains(ip) {
+			log.Printf("subnet=%s contains ip=%s\n", subnet.String(), ip.String())
 			return nil, true
 		}
 	}
@@ -379,12 +380,17 @@ func (s *Service) IsAccessAllowed(r *AccessRequest)(bool) {
 				log.Printf("Checking allow policy conditions\n")
 				found := false
 				for _, condition := range item.Conditions {
-					_, found = condition.isInCondition(r)
+					var err error
+					err, found = condition.isInCondition(r)
+					if err != nil {
+						log.Printf("Error checking condition=%s err=%s\n", condition, err)
+					}
 					if found {
 						break
 					}
 				}
 				if !found && len(item.Conditions) > 0 {
+					log.Printf("policyItem=%s conditions not met\n", item)
 					allowed = false
 				}
 			}

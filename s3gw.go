@@ -149,7 +149,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	case "HEAD":
-		req.AccessType = ranger.WRITE
+		req.AccessType = ranger.READ
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "read")
