@@ -14,6 +14,7 @@ import (
 	"os"
 	"github.com/BurntSushi/toml"
 	"github.com/patrickmn/go-cache"
+	"s3gw/s3"
 )
 
 type Proxy struct {
@@ -41,6 +42,7 @@ var service *ranger.Service
 var keys map[string]string
 var radosClient rados.RadosClient
 var ownerCache *cache.Cache
+var s3Client s3.Client
 
 func NewProxy(target string) *Proxy {
 	u, _ := url.Parse(target)
@@ -117,6 +119,13 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 			groups = append(groups, groupName.Name)
 		}
 	}
+
+	// get tags for this bucket
+	err, tags := s3Client.GetBucketTags(location)
+	if err != nil {
+		log.Printf("Cannot load tags for bucket=%s due to error=%s\n", location, err)
+	}
+	log.Printf("Tags: %s", tags)
 
 	log.Printf("user=%s, bucket=%s, key=%s, method=%s\n", username, o, k, r.Method)
 
@@ -273,6 +282,12 @@ func main() {
 	}
 
 	radosClient = config.Rados
+	s3Client = s3.Client{
+		AccessKey: radosClient.AccessKey,
+		SecretKey: radosClient.SecretKey,
+		EndPoint: radosClient.EndPoint,
+	}
+
 	keys, err = radosClient.SyncUserAccessKeys()
 	if err != nil {
 		log.Fatal("Cannot get initial users from ceph/rados", err)
