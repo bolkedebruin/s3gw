@@ -56,14 +56,18 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 
 	// get remote client ip
 	fwdAddress := r.Header.Get("X-Forwarded-For")
+	remoteAddress := strings.Split(r.RemoteAddr, ":")[0]
 	if fwdAddress != "" {
 		// Accessed via proxy
 		ips := strings.Split(fwdAddress, ",")
 		if len(ips) > 1 {
 			fwdAddress = ips[0]
 		}
+		ips = append(ips, remoteAddress)
+		w.Header().Set("X-Forwarded-For", strings.Join(ips, ","))
 	} else {
-		fwdAddress = r.RemoteAddr
+		fwdAddress = remoteAddress
+		w.Header().Set("X-Forwarded-For", remoteAddress)
 	}
 
 	if len(header) > 0 {

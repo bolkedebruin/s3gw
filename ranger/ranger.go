@@ -9,6 +9,8 @@ import (
 	"log"
 	"math"
 	"time"
+	"errors"
+	"net"
 )
 
 const (
@@ -29,11 +31,16 @@ type Access struct {
 	IsAllowed bool
 }
 
+type Condition struct {
+	Type string
+	Values []string
+}
+
 type PolicyItem struct {
 	Accesses []Access
 	Users []string
 	Groups []string
-	Conditions []string
+	Conditions []Condition
 	DelegateAdmin bool
 
 	score int // calculated policy score
@@ -118,6 +125,19 @@ type DataMaskDef struct {
 	Resources []string
 }
 
+type EvaluatorOptions struct {
+	AttributeName string
+	Label string
+	Description string
+}
+
+type PolicyCondition struct {
+	ItemId int
+	Name string
+	Evaluator string
+	EvaluatorOptions EvaluatorOptions
+}
+
 type ServiceDefinition struct {
 	Id int
 	Guid string
@@ -135,7 +155,7 @@ type ServiceDefinition struct {
 	Configs []ServiceConfig
 	Resources []ServiceResource
 	AccessTypes []AccessTypes
-	PolicyConditions []string
+	PolicyConditions []PolicyCondition
 	ContextEnrichers []string
 	Enums []string
 	DataMaskDef DataMaskDef
@@ -203,6 +223,7 @@ const (
 	READ = "read"
 	WRITE_ACP = "write_acp"
 	READ_ACP = "read_acp"
+
 )
 
 // GetPolicy loads the service definition and resource policies from Ranger
@@ -289,6 +310,28 @@ func hasAccess(names []string, other []string, accesses []Access, accessType str
 	return false
 }
 
+// Check if client ip is in range
+func (c *Condition) isInCondition(r *AccessRequest)(error, bool) {
+	if c.Type != "ipaddress-in-range" {
+		return errors.New("Unknown condition:" + c.Type), false
+	}
+
+	for _, cidr := range c.Values {
+		_, subnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Printf("Invalid cidr=%s\n", cidr)
+			continue
+		}
+		ip := net.ParseIP(r.ClientIpAddress)
+		log.Printf("Checking clientIp=%s cidr=%s\n", r.ClientIpAddress, subnet.String())
+		if subnet.Contains(ip) {
+			return nil, true
+		}
+	}
+
+	return nil, false
+}
+
 // IsAccessAllowed checks if a user is allowed by policy to access the resource location.
 func (s *Service) IsAccessAllowed(r *AccessRequest)(bool) {
 	// TODO: Sort on importance of policy
@@ -331,6 +374,21 @@ func (s *Service) IsAccessAllowed(r *AccessRequest)(bool) {
 				allowed = hasAccess(r.UserGroups, item.Groups, item.Accesses, r.AccessType, false)
 			}
 
+			// conditions
+			if allowed {
+				log.Printf("Checking allow policy conditions\n")
+				found := false
+				for _, condition := range item.Conditions {
+					_, found = condition.isInCondition(r)
+					if found {
+						break
+					}
+				}
+				if !found && len(item.Conditions) > 0 {
+					allowed = false
+				}
+			}
+
 			// TODO: check exceptions
 		}
 
@@ -343,6 +401,21 @@ func (s *Service) IsAccessAllowed(r *AccessRequest)(bool) {
 			// groups
 			if allowed {
 				allowed = !hasAccess(r.UserGroups, item.Groups, item.Accesses, r.AccessType, false)
+			}
+
+			// conditions
+			if !allowed {
+				log.Printf("Checking deny policy conditions\n")
+				found := false
+				for _, condition := range item.Conditions {
+					_, found = condition.isInCondition(r)
+					if found {
+						break
+					}
+				}
+				if !found && len(item.Conditions) > 0 {
+					allowed = true
+				}
 			}
 
 			// TODO: check exceptions
