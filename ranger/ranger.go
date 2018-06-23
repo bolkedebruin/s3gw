@@ -8,6 +8,7 @@ import (
 	"github.com/ryanuber/go-glob"
 	"log"
 	"math"
+	"time"
 )
 
 const (
@@ -151,8 +152,26 @@ type Service struct {
 	ServiceDef ServiceDefinition
 }
 
-type AccessRequest interface {
+type AccessResource struct {
+	Owner string
+	Location string // Elements map[string]interface{}
+}
 
+type AccessRequest struct {
+	Resource AccessResource
+	AccessType string
+	User string
+	UserGroups []string
+	AccessTime time.Time
+	ClientIpAddress string
+	ForwardedAdresses []string
+	RemoteIpAddress string
+	ClientType string
+	Action string
+	RequestData string
+	SessionId string
+	Context map[string]interface{}
+	ClusterName string
 }
 
 const (
@@ -179,6 +198,11 @@ const (
 	GROUP_PUBLIC = "public"
 	USER_CURRENT = "{USER}"
 	USER_OWNER = "{OWNER}"
+
+	WRITE = "write"
+	READ = "read"
+	WRITE_ACP = "write_acp"
+	READ_ACP = "read_acp"
 )
 
 // GetPolicy loads the service definition and resource policies from Ranger
@@ -266,14 +290,12 @@ func hasAccess(names []string, other []string, accesses []Access, accessType str
 }
 
 // IsAccessAllowed checks if a user is allowed by policy to access the resource location.
-func (s *Service) IsAccessAllowed(
-	username string, userGroups []string,
-	accessType string, location string, owner string)(bool) {
+func (s *Service) IsAccessAllowed(r *AccessRequest)(bool) {
 	// TODO: Sort on importance of policy
 	sort.SliceStable(s.Policies, func(i, j int) bool {return s.Policies[i].Id < s.Policies[j].Id})
 
 	log.Printf("Checking policy for user=%s, groups=%s, access=%s, location=%s\n",
-		username, userGroups, accessType, location)
+		r.User, r.UserGroups, r.AccessType, r.Resource.Location)
 
 	allowed := false
 	resourceMatch := false
@@ -285,7 +307,7 @@ func (s *Service) IsAccessAllowed(
 				if v.IsRecursive {
 					bucketName += "*"
 				}
-				if glob.Glob(bucketName, location) {
+				if glob.Glob(bucketName, r.Resource.Location) {
 					resourceMatch = true
 				}
 			}
@@ -302,11 +324,11 @@ func (s *Service) IsAccessAllowed(
 		log.Printf("Checking allow policy items=%d\n", len(p.PolicyItems))
 		for _, item := range p.PolicyItems {
 			// user first
-			allowed = hasAccess([]string{username}, item.Users, item.Accesses, accessType, username == owner)
+			allowed = hasAccess([]string{r.User}, item.Users, item.Accesses, r.AccessType, r.User == r.Resource.Owner)
 
 			// groups
 			if !allowed {
-				allowed = hasAccess(userGroups, item.Groups, item.Accesses, accessType, false)
+				allowed = hasAccess(r.UserGroups, item.Groups, item.Accesses, r.AccessType, false)
 			}
 
 			// TODO: check exceptions
@@ -316,11 +338,11 @@ func (s *Service) IsAccessAllowed(
 
 		for _, item := range p.DenyPolicyItems {
 			// allowed signals denial
-			allowed = !hasAccess([]string{username}, item.Users, item.Accesses, accessType, username == owner)
+			allowed = !hasAccess([]string{r.User}, item.Users, item.Accesses, r.AccessType, r.User == r.Resource.Owner)
 
 			// groups
 			if allowed {
-				allowed = !hasAccess(userGroups, item.Groups, item.Accesses, accessType, false)
+				allowed = !hasAccess(r.UserGroups, item.Groups, item.Accesses, r.AccessType, false)
 			}
 
 			// TODO: check exceptions

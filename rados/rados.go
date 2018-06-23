@@ -29,7 +29,7 @@ func (c *RadosClient) SyncUserAccessKeys() (map[string] string, error) {
 	client, err := rgw.NewAdminAPI(cfg)
 
 	if err != nil {
-		log.Fatal("Cannot connect to radosgw error=%s\n", err)
+		log.Printf("Cannot connect to radosgw error=%s\n", err)
 		return nil, err
 	}
 
@@ -62,7 +62,7 @@ func (c *RadosClient) GetBucketOwner(bucket string)(string, error) {
 	client, err := rgw.NewAdminAPI(cfg)
 
 	if err != nil {
-		log.Fatal("Cannot connect to radosgw error=%s\n", err)
+		log.Printf("Cannot connect to radosgw error=%s\n", err)
 		return "", err
 	}
 
@@ -74,7 +74,7 @@ func (c *RadosClient) GetBucketOwner(bucket string)(string, error) {
 	}
 
 	if len(stats) > 1 {
-		log.Fatal("Too many stats (%d) returned for bucket=%s\n", len(stats), bucket)
+		log.Printf("Too many stats (%d) returned for bucket=%s\n", len(stats), bucket)
 		return "", errors.New("Too many stats for bucket=" + bucket)
 	}
 
