@@ -11,6 +11,15 @@ import (
 	"net/http/httputil"
 )
 
+type Proxy struct {
+	target *url.URL
+	proxy *httputil.ReverseProxy
+}
+
+type Transport struct {
+
+}
+
 func NewProxy(target string) *Proxy {
 	u, _ := url.Parse(target)
 
@@ -44,7 +53,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		pos2 := strings.Index(header, ",") - 1
 		credentials := strings.Split(header[pos1:pos2], "/")
 
-		if name, ok := keys[credentials[0]]; !ok {
+		if name, ok := accessKey2Username[credentials[0]]; !ok {
 			log.Printf("Access denied accessKey=%s due to not found\n", credentials[0])
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return

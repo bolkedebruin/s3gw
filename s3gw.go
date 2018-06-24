@@ -1,8 +1,6 @@
 package main
 
 import (
-	"net/url"
-	"net/http/httputil"
 	"strings"
 	"flag"
 	"log"
@@ -14,15 +12,6 @@ import (
 	"github.com/patrickmn/go-cache"
 	"s3gw/s3"
 )
-
-type Proxy struct {
-	target *url.URL
-	proxy *httputil.ReverseProxy
-}
-
-type Transport struct {
-
-}
 
 type RangerConfig struct {
 	ServiceName string
@@ -39,10 +28,12 @@ type Config struct {
 	CertFile         string
 	HTTPReadTimeout  int
 	HTTPWriteTimeout int
+	Auth			 string
+	Keytab			 string
 }
 
 var service *ranger.Service
-var keys map[string]string
+var accessKey2Username map[string]string
 var radosClient rados.RadosClient
 var ownerCache *cache.Cache
 var s3Client s3.Client
@@ -128,7 +119,7 @@ func main() {
 		EndPoint: radosClient.EndPoint,
 	}
 
-	keys, err = radosClient.SyncUserAccessKeys()
+	accessKey2Username, err = radosClient.SyncUserAccessKeys()
 	if err != nil {
 		log.Fatal("Cannot get initial users from ceph/rados", err)
 		panic(err)
@@ -136,7 +127,7 @@ func main() {
 	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		for range ticker.C {
-			log.Printf("Updating Ranger Policies and Rados Access keys\n")
+			log.Printf("Updating Ranger Policies and Rados Access accessKey2Username\n")
 			newService, err := ranger.GetPolicy(config.Ranger.ServiceName, config.Ranger.EndPoint)
 			if err != nil {
 				log.Printf("Cannot refresh Ranger policy due to error %s", err)
@@ -148,7 +139,7 @@ func main() {
 			if err != nil {
 				log.Printf("Cannot refresh users from Ceph/Rados due to error %s", err)
 			} else {
-				keys = newKeys
+				accessKey2Username = newKeys
 			}
 		}
 	}()
