@@ -196,3 +196,21 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
+func GetBucketObjectKey(s string) (string, string) {
+	pos := strings.Index(s, "?")
+	if pos > 0 {
+		s = s[0:pos-1]
+	}
+	split := strings.Split(s,"/")
+
+	switch len(split) {
+	case 1:
+		return "", ""
+	case 2:
+		return split[1], ""
+	default:
+		return split[1], split[2]
+	}
+
+	return "", ""
+}

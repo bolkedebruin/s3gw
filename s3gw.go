@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"flag"
 	"log"
 	"time"
@@ -37,26 +36,6 @@ var accessKey2Username map[string]string
 var radosClient rados.RadosClient
 var ownerCache *cache.Cache
 var s3Client s3.Client
-
-
-func GetBucketObjectKey(s string) (string, string) {
-	pos := strings.Index(s, "?")
-	if pos > 0 {
-		s = s[0:pos-1]
-	}
-	split := strings.Split(s,"/")
-
-	switch len(split) {
-	case 1:
-		return "", ""
-	case 2:
-		return split[1], ""
-	default:
-		return split[1], split[2]
-	}
-
-	return "", ""
-}
 
 func ReadConfig(path string)(Config) {
 	_, err := os.Stat(path)
