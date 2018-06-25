@@ -215,14 +215,14 @@ const (
 	CUSTOM_CONDITION_PENALTY = 5
 	DYNAMIC_RESOURCE_EVAL_PENALTY = 20
 
-	GROUP_PUBLIC = "public"
-	USER_CURRENT = "{USER}"
-	USER_OWNER = "{OWNER}"
+	GroupPublic = "public"
+	UserCurrent = "{USER}"
+	UserOwner   = "{OWNER}"
 
-	WRITE = "write"
-	READ = "read"
-	WRITE_ACP = "write_acp"
-	READ_ACP = "read_acp"
+	Write    = "write"
+	Read     = "read"
+	WriteAcp = "write_acp"
+	ReadAcp  = "read_acp"
 
 )
 
@@ -275,7 +275,7 @@ func contains(haystack []string, needle string)(bool) {
 func (pi *PolicyItem) computeEvalScore(service ServiceDefinition) {
 	score := ITEM_DEFAULT_SCORE
 
-	if contains(pi.Groups, GROUP_PUBLIC) {
+	if contains(pi.Groups, GroupPublic) {
 		score -= DISCOUNT_USERSGROUPS
 	} else {
 		count := len(pi.Users) + len(pi.Groups)
@@ -297,7 +297,7 @@ func (pi *PolicyItem) computeEvalScore(service ServiceDefinition) {
 func hasAccess(names []string, other []string, accesses []Access, accessType string, isOwner bool)(bool) {
 	for _, name := range names {
 		for i := range other {
-			if name == other[i] || other[i] == USER_CURRENT || (other[i] == USER_OWNER && isOwner) {
+			if name == other[i] || other[i] == UserCurrent || (other[i] == UserOwner && isOwner) {
 				for _, access := range accesses {
 					if access.Type == accessType && access.IsAllowed {
 						return true
@@ -310,24 +310,77 @@ func hasAccess(names []string, other []string, accesses []Access, accessType str
 	return false
 }
 
-// Check if client ip is in range
+// Check all IPs (remote, client, forward addresses) supplied in the chain from the
+// client are within the ranges specified
 func (c *Condition) isInCondition(r *AccessRequest)(error, bool) {
 	if c.Type != "ipaddress-in-range" {
 		return errors.New("Unknown condition:" + c.Type), false
 	}
 
+	var clientIpOk, remoteOk bool
 	for _, cidr := range c.Values {
+		clientIpOk, remoteOk = false, false
 		_, subnet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			log.Printf("Invalid cidr=%s\n", cidr)
 			continue
 		}
+
+		// check client ip
 		ip := net.ParseIP(r.ClientIpAddress)
 		log.Printf("Checking clientIp=%s cidr=%s\n", ip.String(), subnet.String())
 		if subnet.Contains(ip) {
 			log.Printf("subnet=%s contains ip=%s\n", subnet.String(), ip.String())
-			return nil, true
+			clientIpOk = true
 		}
+
+		// check remote ip
+		ip = net.ParseIP(r.RemoteIpAddress)
+		log.Printf("Checking remoteAddr=%s cidr=%s\n", ip.String(), subnet.String())
+		if subnet.Contains(ip) {
+			log.Printf("subnet=%s contains ip=%s\n", subnet.String(), ip.String())
+			remoteOk = true
+		}
+
+		if clientIpOk && remoteOk {
+			break
+		}
+	}
+
+	if !clientIpOk || !remoteOk {
+		return nil, false
+	}
+
+	// no forward addresses
+	if len(r.ForwardedAdresses) == 0 {
+		return nil, true
+	}
+
+	// check forwarded ip addresses. *all* need to be in range
+	fwdsOk := false
+	for _, fwdAddress := range r.ForwardedAdresses {
+		for _, cidr := range c.Values {
+			// error was already caught above
+			_, subnet, _ := net.ParseCIDR(cidr)
+
+			log.Printf("Checking forwarded address=%s cidr=%s\n", fwdAddress, subnet.String())
+			ip := net.ParseIP(fwdAddress)
+			if ip == nil {
+				log.Printf("Invalid forward address=%s received\n", fwdAddress)
+				return errors.New("Invalid forward address " + fwdAddress), false
+			}
+			if subnet.Contains(ip) {
+				log.Printf("subnet=%s contains ip=%s\n", subnet.String(), ip.String())
+				fwdsOk = true
+				break
+			} else {
+				fwdsOk = false
+			}
+		}
+	}
+
+	if fwdsOk {
+		return nil, true
 	}
 
 	return nil, false

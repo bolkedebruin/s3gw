@@ -31,21 +31,24 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 	p.proxy.Transport = &Transport{}
 
 	var username string
+	var fwdAddresses []string
+	var clientIp string
 
 	// get remote client ip
-	fwdAddress := r.Header.Get("X-Forwarded-For")
+	fwdHeader := r.Header.Get("X-Forwarded-For")
 	remoteAddress := strings.Split(r.RemoteAddr, ":")[0]
-	if fwdAddress != "" {
+	if fwdHeader != "" {
 		// Accessed via proxy
-		ips := strings.Split(fwdAddress, ",")
-		if len(ips) > 1 {
-			fwdAddress = ips[0]
+		fwdAddresses = strings.Split(fwdHeader, ",")
+		if len(fwdAddresses) > 0 {
+			// hope the first one in the list is the client ip
+			clientIp = fwdAddresses[1]
 		}
-		ips = append(ips, remoteAddress)
-		w.Header().Set("X-Forwarded-For", strings.Join(ips, ","))
+		newFwdAddresses := append(fwdAddresses, remoteAddress)
+		w.Header().Set("X-Forwarded-For", strings.Join(newFwdAddresses, ","))
 	} else {
-		fwdAddress = remoteAddress
 		w.Header().Set("X-Forwarded-For", remoteAddress)
+		clientIp = remoteAddress
 	}
 
 	if len(header) > 0 {
@@ -114,10 +117,11 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 			Owner: owner,
 			Location: location,
 		},
-		Action: r.Method,
-		AccessTime: time.Now(),
-		RemoteIpAddress: r.RemoteAddr,
-		ClientIpAddress: fwdAddress,
+		Action:          	r.Method,
+		AccessTime:      	time.Now(),
+		RemoteIpAddress: 	remoteAddress,
+		ClientIpAddress: 	clientIp,
+		ForwardedAdresses:	fwdAddresses,
 	}
 
 	switch strings.ToUpper(r.Method) {
@@ -125,7 +129,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("uploadId")) > 0 {
 			log.Printf("Skip notification for multipart ABORT")
 		}
-		req.AccessType = ranger.WRITE
+		req.AccessType = ranger.Write
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "write")
@@ -134,7 +138,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	case "HEAD":
-		req.AccessType = ranger.READ
+		req.AccessType = ranger.Read
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, "read")
@@ -143,9 +147,9 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	case "PUT":
-		req.AccessType = ranger.WRITE
+		req.AccessType = ranger.Write
 		if len(query.Get("acl")) > 0 {
-			req.AccessType = ranger.WRITE_ACP
+			req.AccessType = ranger.WriteAcp
 		}
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
@@ -155,9 +159,9 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		}
 		break
 	case "GET":
-		req.AccessType = ranger.READ
+		req.AccessType = ranger.Read
 		if len(query.Get("acl")) > 0 {
-			req.AccessType = ranger.READ_ACP
+			req.AccessType = ranger.ReadAcp
 		}
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
@@ -170,7 +174,7 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request){
 		if len(query.Get("uploads")) > 0 {
 			log.Printf("skip notification for multipart INITIATE")
 		}
-		req.AccessType = ranger.WRITE
+		req.AccessType = ranger.Write
 		if !service.IsAccessAllowed(req) {
 			log.Printf("Access denied location=%s, user=%s, groups=%s, accessType=%s",
 				location, username, groups, req.AccessType)
